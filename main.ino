@@ -1,63 +1,125 @@
 #include <TM1637Display.h>
 
-const int CLK = 9; // CLK pin connection to the display
-const int DIO = 8; // DIO pin connection to the display
+//~ PIN Constants
+
+const int PIN_CLK = 9; // CLK pin connection to the display
+const int PIN_DIO = 8; // DIO pin connection to the display
+
+const int PIN_BTN1 = 13;
+const int PIN_BTN2 = 12;
+const int PIN_BTN3 = 11;
+
+//~ Display Constants
+
 const int BRIGHTNESS = 3; // Display brightness (0 - 7)
 
-const int BTN1 = 13;
-const int BTN2 = 12;
-const int BTN3 = 11;
+//~ Game Constants
 
-const int START_COUNTDOWN = 5;
+const int COUNTDOWN_SECS = 5;
 
-int NumCountdown = START_COUNTDOWN;
-int Team = 0;
+const int STATE_NONE = 0;
+const int STATE_WAITING = 1;
+const int STATE_TICKING = 2;
+const int STATE_WINNER = 3;
 
-TM1637Display display(CLK, DIO);  //set up the 4-Digit Display.
+//~ Runtime Variables
+
+int GameState = STATE_NONE;
+unsigned long CountdownStart = 0;
+int DisplayNumber = 0;
+int TeamNumber = 0;
+int WinnerPosition = 0;
+
+TM1637Display display(PIN_CLK, PIN_DIO);  //set up the 4-Digit Display.
 
 void setup()
 {
   // Set button pin modes
-  pinMode(BTN1, INPUT_PULLUP);
-  pinMode(BTN2, INPUT_PULLUP);
-  pinMode(BTN3, INPUT_PULLUP);
+  pinMode(PIN_BTN1, INPUT_PULLUP);
+  pinMode(PIN_BTN2, INPUT_PULLUP);
+  pinMode(PIN_BTN3, INPUT_PULLUP);
   // Set display brightness
   display.setBrightness(BRIGHTNESS, true);
-
 }
 
+// Read active team number
 int readTeam()
 {
-   if (digitalRead(BTN1) == LOW) {
+   if (digitalRead(PIN_BTN1) == LOW) {
      return 1;
-   } else if (digitalRead(BTN2) == LOW) {
+   } else if (digitalRead(PIN_BTN2) == LOW) {
      return 2;
-   } else if (digitalRead(BTN3) == LOW) {
+   } else if (digitalRead(PIN_BTN3) == LOW) {
      return 3;
    }
    return 0;
 }
 
-void countdown()
+// Handle STATE_NONE
+void handleNone()
 {
-  if (NumCountdown >= 0) {
-    display.showNumberDecEx((NumCountdown / 60 * 100) + NumCountdown % 60, 0b01000000, true);
-    NumCountdown--;
+  display.clear();
+  GameState = STATE_WAITING;
+}
+
+// Handle STATE_WAITING
+void handleWaiting()
+{
+  int activeTeam = readTeam();
+  if (activeTeam > 0) {
+    GameState = STATE_TICKING;
+    CountdownStart = millis();
+    TeamNumber = activeTeam;
   }
+}
+
+// Handle STATE_TICKING
+void handleTicking()
+{
+  int activeTeam = readTeam();
+  if (activeTeam != TeamNumber) {
+    GameState = STATE_NONE;
+    return;
+  }
+  int remaining = COUNTDOWN_SECS - (millis() - CountdownStart) / 1000L;
+  if (remaining <= 0) {
+    GameState = STATE_WINNER;
+  } else if (DisplayNumber != remaining) {
+    DisplayNumber = remaining;
+    display.showNumberDecEx((remaining / 60 * 100) + remaining % 60, 0b01000000, true);
+  }
+}
+
+// Handle STATE_WINNER
+void handleWinner()
+{
+  int digitPosition = (millis() / 250) % 4;
+  if (digitPosition == WinnerPosition) {
+    return;
+  }
+  WinnerPosition = digitPosition;
+  uint8_t data[] = { 0, 0, 0, 0 };
+  data[digitPosition] = display.encodeDigit(TeamNumber);
+  display.setSegments(data);
 }
 
 void loop()
 {
-  int activeTeam = readTeam();
-  if (activeTeam == 0) {
-    display.showNumberDec(8888, true);
-  } else if (activeTeam == Team && NumCountdown >= 0) {
-    countdown();
-  } else if (activeTeam != Team) {
-    NumCountdown = START_COUNTDOWN;
-    Team = activeTeam;
-  } else if (NumCountdown < 0) {
-    display.showNumberDec(activeTeam);
+  switch (GameState)
+  {
+  case STATE_NONE:
+    handleNone();
+  case STATE_WAITING:
+    handleWaiting();
+    break;
+  case STATE_TICKING:
+    handleTicking();
+    break;
+  case STATE_WINNER:
+    handleWinner();
+    break;
+  default:
+    break;
   }
-  delay(1000);
+  delay(100);
 }
